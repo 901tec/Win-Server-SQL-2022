@@ -106,6 +106,19 @@ bootstrap `sa` password during SQL setup. The script disables `sa` after setup.
 ```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 
+$RequiredDirectories = @(
+  'D:\901TEC',
+  'D:\901TEC\Downloads',
+  'D:\901TEC\SQLServer2022',
+  'C:\SQLData',
+  'D:\SQLLogs',
+  'D:\SQLBackups'
+)
+
+foreach ($Directory in $RequiredDirectories) {
+  New-Item -ItemType Directory -Path $Directory -Force | Out-Null
+}
+
 .\scripts\Install-WinServerSql2022Rds.ps1 `
   -AcceptSqlLicenseTerms `
   -SqlMediaPath 'D:\901TEC\SQLServer2022' `
@@ -121,6 +134,19 @@ To have the script download SQL Server 2022 Developer media to `D:` first, add
 `-DownloadSqlMedia`:
 
 ```powershell
+$RequiredDirectories = @(
+  'D:\901TEC',
+  'D:\901TEC\Downloads',
+  'D:\901TEC\SQLServer2022',
+  'C:\SQLData',
+  'D:\SQLLogs',
+  'D:\SQLBackups'
+)
+
+foreach ($Directory in $RequiredDirectories) {
+  New-Item -ItemType Directory -Path $Directory -Force | Out-Null
+}
+
 .\scripts\Install-WinServerSql2022Rds.ps1 `
   -AcceptSqlLicenseTerms `
   -DownloadSqlMedia `

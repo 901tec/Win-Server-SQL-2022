@@ -5,6 +5,19 @@
 
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 
+$RequiredDirectories = @(
+    'D:\901TEC',
+    'D:\901TEC\Downloads',
+    'D:\901TEC\SQLServer2022',
+    'C:\SQLData',
+    'D:\SQLLogs',
+    'D:\SQLBackups'
+)
+
+foreach ($Directory in $RequiredDirectories) {
+    New-Item -ItemType Directory -Path $Directory -Force | Out-Null
+}
+
 ..\scripts\Install-WinServerSql2022Rds.ps1 `
     -AcceptSqlLicenseTerms `
     -DownloadSqlMedia `
