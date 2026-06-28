@@ -24,6 +24,7 @@ The script is intentionally conservative:
   `C:\Program Files\Microsoft SQL Server`, `C:\SQLData`, `D:\SQLLogs`, and
   `D:\SQLBackups`.
 - Optional SQL TCP/IP enablement and firewall rule.
+- Optional SQL Server Management Studio installation.
 - Remote Desktop Session Host and RD Licensing roles.
 - Windows Remote Desktop firewall rules.
 - Optional members in the local `Remote Desktop Users` group.
@@ -127,6 +128,7 @@ foreach ($Directory in $RequiredDirectories) {
   -RdsUsers 'CONTOSO\AppUsers' `
   -EnableSqlTcp `
   -OpenSqlFirewall `
+  -InstallSsms `
   -Restart
 ```
 
@@ -155,6 +157,7 @@ foreach ($Directory in $RequiredDirectories) {
   -RdsUsers 'CONTOSO\AppUsers' `
   -EnableSqlTcp `
   -OpenSqlFirewall `
+  -InstallSsms `
   -Restart
 ```
 
@@ -190,6 +193,21 @@ Default download settings:
 The default Microsoft URL currently points to the SQL Server 2022 Developer
 bootstrapper. Override `-SqlDownloadUrl` if you maintain an internal or licensed
 installer source.
+
+## SSMS behavior
+
+Use `-InstallSsms` to download and install SQL Server Management Studio during
+the deployment. The installer is stored in `D:\901TEC\Downloads`.
+
+Default SSMS settings:
+
+```powershell
+-SsmsDownloadUrl 'https://aka.ms/ssms/22/release/vs_SSMS.exe'
+-SsmsDownloadDir 'D:\901TEC\Downloads'
+```
+
+The script skips SSMS if it already appears installed unless `-Force` is used.
+You can also pass `-SsmsInstallerPath` to use a manually staged SSMS installer.
 
 ## Common examples
 
@@ -255,6 +273,11 @@ Install SQL Server with Windows Authentication only:
 | `-EnableSqlTcp` | Off | Enable SQL TCP/IP after setup. |
 | `-SqlTcpPort` | `1433` | Static SQL TCP port when TCP/IP is enabled. |
 | `-OpenSqlFirewall` | Off | Add inbound firewall rule for the SQL TCP port. |
+| `-InstallSsms` | Off | Download and quietly install SQL Server Management Studio. |
+| `-SsmsDownloadUrl` | Microsoft SSMS 22 bootstrapper | URL for the SSMS installer bootstrapper. |
+| `-SsmsDownloadDir` | `D:\901TEC\Downloads` | Folder where the SSMS installer is stored. |
+| `-SsmsInstallerPath` | None | Path to a manually staged SSMS installer. |
+| `-SsmsInstallPath` | SSMS default | Optional custom SSMS install path. |
 | `-InstallRds` | Off | Install and configure RDS roles. |
 | `-RdsLicenseMode` | `PerUser` | RDS mode: `PerUser` or `PerDevice`. |
 | `-RdsLicenseServers` | Local computer | License server list to assign to Session Host. |

@@ -26,4 +26,5 @@ foreach ($Directory in $RequiredDirectories) {
     -RdsLicenseMode PerUser `
     -RdsUsers 'CONTOSO\AppUsers' `
     -EnableSqlTcp `
-    -OpenSqlFirewall
+    -OpenSqlFirewall `
+    -InstallSsms

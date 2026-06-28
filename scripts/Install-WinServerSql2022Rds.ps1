@@ -49,6 +49,16 @@ param(
 
     [switch]$OpenSqlFirewall,
 
+    [switch]$InstallSsms,
+
+    [string]$SsmsDownloadUrl = 'https://aka.ms/ssms/22/release/vs_SSMS.exe',
+
+    [string]$SsmsDownloadDir = 'D:\901TEC\Downloads',
+
+    [string]$SsmsInstallerPath,
+
+    [string]$SsmsInstallPath,
+
     [switch]$InstallRds,
 
     [ValidateSet('PerUser', 'PerDevice')]
@@ -447,6 +457,71 @@ END;
     Invoke-SqlNonQueryWithRetry -InstanceName $InstanceName -Query $query
 }
 
+function Get-InstalledSsms {
+    $uninstallPaths = @(
+        'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
+        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*'
+    )
+
+    Get-ItemProperty -Path $uninstallPaths -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.DisplayName -like 'SQL Server Management Studio*' -or
+            $_.DisplayName -like 'Microsoft SQL Server Management Studio*'
+        } |
+        Sort-Object -Property DisplayVersion -Descending |
+        Select-Object -First 1
+}
+
+function Invoke-SsmsInstall {
+    $existingSsms = Get-InstalledSsms
+    if ($existingSsms -and -not $Force) {
+        Write-Host "SSMS already appears to be installed: $($existingSsms.DisplayName) $($existingSsms.DisplayVersion)"
+        return
+    }
+
+    Write-Step "Installing SQL Server Management Studio"
+
+    $installerPath = $SsmsInstallerPath
+    if (-not $installerPath) {
+        Ensure-Directory -Path $SsmsDownloadDir
+        $installerName = Get-DownloadFileName -Uri $SsmsDownloadUrl -DefaultFileName 'vs_SSMS.exe'
+        $installerPath = Join-Path -Path $SsmsDownloadDir -ChildPath $installerName
+
+        if (-not (Test-Path -LiteralPath $installerPath -PathType Leaf) -or $Force) {
+            Write-Host "Downloading SSMS installer to $installerPath"
+            Save-FileFromUrl -Uri $SsmsDownloadUrl -OutFile $installerPath
+        }
+        else {
+            Write-Host "Using existing SSMS installer at $installerPath"
+        }
+    }
+
+    if (-not (Test-Path -LiteralPath $installerPath -PathType Leaf)) {
+        throw "SSMS installer was not found at $installerPath"
+    }
+
+    $arguments = @(
+        '--quiet',
+        '--norestart',
+        '--wait'
+    )
+
+    if ($SsmsInstallPath) {
+        Ensure-Directory -Path $SsmsInstallPath
+        $arguments += @('--installPath', ('"{0}"' -f $SsmsInstallPath))
+    }
+
+    $process = Start-Process -FilePath $installerPath -ArgumentList $arguments -Wait -PassThru
+
+    if ($process.ExitCode -eq 3010) {
+        $script:NeedsRestart = $true
+        Write-Warning "SSMS setup completed and requested a reboot."
+    }
+    elseif ($process.ExitCode -ne 0) {
+        throw "SSMS setup failed with exit code $($process.ExitCode)."
+    }
+}
+
 function New-SqlSetupConfigurationFile {
     param(
         [Parameter(Mandatory = $true)][string]$InstanceName,
@@ -784,6 +859,10 @@ try {
     }
     elseif (-not $SkipRdsInstall) {
         Write-Verbose "RDS installation skipped because -InstallRds was not specified."
+    }
+
+    if ($InstallSsms) {
+        Invoke-SsmsInstall
     }
 
     if ($script:NeedsRestart) {
