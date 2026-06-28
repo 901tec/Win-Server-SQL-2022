@@ -22,6 +22,8 @@ foreach ($Directory in $RequiredDirectories) {
     -AcceptSqlLicenseTerms `
     -DownloadSqlMedia `
     -SqlMediaPath 'D:\901TEC\SQLServer2022' `
+    -KeepSaEnabled `
+    -SqlSysAdminAccounts "$($env:USERDOMAIN)\$($env:USERNAME)",'BUILTIN\Administrators' `
     -InstallRds `
     -RdsLicenseMode PerUser `
     -RdsUsers 'CONTOSO\AppUsers' `

@@ -30,7 +30,7 @@ param(
     [switch]$KeepSaEnabled,
 
     [ValidateNotNullOrEmpty()]
-    [string[]]$SqlSysAdminAccounts = @('BUILTIN\Administrators'),
+    [string[]]$SqlSysAdminAccounts = @("$env:USERDOMAIN\$env:USERNAME", 'BUILTIN\Administrators'),
 
     [string]$SqlProductKey,
 
@@ -67,6 +67,8 @@ param(
     [string[]]$RdsLicenseServers = @($env:COMPUTERNAME),
 
     [string[]]$RdsUsers = @(),
+
+    [switch]$RepairSqlAccess,
 
     [switch]$SkipSqlInstall,
 
@@ -394,6 +396,12 @@ function Get-SqlConnectionServerName {
     return "localhost\$InstanceName"
 }
 
+function Escape-SqlLiteral {
+    param([Parameter(Mandatory = $true)][string]$Value)
+
+    $Value -replace "'", "''"
+}
+
 function Invoke-SqlNonQueryWithRetry {
     param(
         [Parameter(Mandatory = $true)][string]$InstanceName,
@@ -402,7 +410,7 @@ function Invoke-SqlNonQueryWithRetry {
     )
 
     $serverName = Get-SqlConnectionServerName -InstanceName $InstanceName
-    $connectionString = "Server=$serverName;Database=master;Integrated Security=SSPI;Connection Timeout=5;"
+    $connectionString = "Server=$serverName;Database=master;Integrated Security=SSPI;Encrypt=True;TrustServerCertificate=True;Connection Timeout=5;"
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
     $lastError = $null
 
@@ -455,6 +463,71 @@ END;
 
     Write-Step "Disabling the SQL sa login"
     Invoke-SqlNonQueryWithRetry -InstanceName $InstanceName -Query $query
+}
+
+function Enable-SqlSaLogin {
+    param([Parameter(Mandatory = $true)][string]$InstanceName)
+
+    $query = @"
+DECLARE @SaLoginName sysname = SUSER_SNAME(0x01);
+
+IF @SaLoginName IS NOT NULL
+BEGIN
+    DECLARE @Sql nvarchar(max) = N'ALTER LOGIN ' + QUOTENAME(@SaLoginName) + N' ENABLE;';
+    EXEC sys.sp_executesql @Sql;
+END;
+"@
+
+    Write-Step "Enabling the SQL sa login"
+    Invoke-SqlNonQueryWithRetry -InstanceName $InstanceName -Query $query
+}
+
+function Add-SqlSysAdminAccounts {
+    param(
+        [Parameter(Mandatory = $true)][string]$InstanceName,
+        [Parameter(Mandatory = $true)][string[]]$Accounts
+    )
+
+    foreach ($account in ($Accounts | Where-Object { $_ } | Select-Object -Unique)) {
+        $escapedAccount = Escape-SqlLiteral -Value $account
+        $query = @"
+DECLARE @LoginName sysname = N'$escapedAccount';
+
+IF SUSER_ID(@LoginName) IS NULL
+BEGIN
+    DECLARE @CreateLoginSql nvarchar(max) = N'CREATE LOGIN ' + QUOTENAME(@LoginName) + N' FROM WINDOWS;';
+    EXEC sys.sp_executesql @CreateLoginSql;
+END;
+
+IF IS_SRVROLEMEMBER(N'sysadmin', @LoginName) <> 1
+BEGIN
+    DECLARE @AddRoleSql nvarchar(max) = N'ALTER SERVER ROLE [sysadmin] ADD MEMBER ' + QUOTENAME(@LoginName) + N';';
+    EXEC sys.sp_executesql @AddRoleSql;
+END;
+"@
+
+        Write-Step "Ensuring SQL sysadmin account $account"
+        Invoke-SqlNonQueryWithRetry -InstanceName $InstanceName -Query $query
+    }
+}
+
+function Repair-SqlAccess {
+    $serviceName = Get-SqlServiceName -InstanceName $SqlInstanceName
+    $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+
+    if (-not $service) {
+        throw "SQL service $serviceName was not found. Cannot repair SQL access."
+    }
+
+    if ($service.Status -ne 'Running') {
+        Start-Service -Name $serviceName
+    }
+
+    Add-SqlSysAdminAccounts -InstanceName $SqlInstanceName -Accounts $SqlSysAdminAccounts
+
+    if ($SqlAuthMode -eq 'Mixed' -and $KeepSaEnabled) {
+        Enable-SqlSaLogin -InstanceName $SqlInstanceName
+    }
 }
 
 function Get-InstalledSsms {
@@ -607,6 +680,7 @@ function Invoke-SqlSetup {
     $existingService = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
     if ($existingService -and -not $Force) {
         Write-Warning "SQL service $serviceName already exists. Skipping SQL setup. Use -Force to run setup anyway."
+        Repair-SqlAccess
         return
     }
 
@@ -826,8 +900,12 @@ function Add-RdsUsers {
 try {
     Assert-WindowsServer
 
-    if ($SkipSqlInstall -and $SkipRdsInstall) {
+    if ($SkipSqlInstall -and $SkipRdsInstall -and -not $InstallSsms -and -not $RepairSqlAccess) {
         throw "Both -SkipSqlInstall and -SkipRdsInstall were specified. There is nothing to do."
+    }
+
+    if ($RepairSqlAccess) {
+        Repair-SqlAccess
     }
 
     if (-not $SkipSqlInstall) {

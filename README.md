@@ -58,14 +58,14 @@ Default behavior is mixed authentication mode with SQL logins locked down:
 - After setup completes, the script connects with Windows Authentication and
   disables the built-in `sa` login.
 - The installer does not create any additional SQL logins.
-- Members of `BUILTIN\Administrators` are made SQL sysadmins unless you pass a
-  different `-SqlSysAdminAccounts` list.
+- The installing Windows user and `BUILTIN\Administrators` are made SQL
+  sysadmins unless you pass a different `-SqlSysAdminAccounts` list.
 
-That means local Windows Administrators are not literally using the `sa` login,
-but they do receive the SQL Server `sysadmin` role by default in this script.
-Permission-wise, that is effectively equivalent to `sa`. If you want tighter
-control, pass a specific domain or local group with `-SqlSysAdminAccounts`, such
-as `CONTOSO\DBAdmins`.
+That means the installing Windows user and local Windows Administrators are not
+literally using the `sa` login, but they do receive the SQL Server `sysadmin`
+role by default in this script. Permission-wise, that is effectively equivalent
+to `sa`. If you want tighter control, pass a specific domain or local group with
+`-SqlSysAdminAccounts`, such as `CONTOSO\DBAdmins`.
 
 Windows admin users can add SQL logins later from SQL Server Management Studio
 or T-SQL after the install. If you want Windows Authentication only, pass
@@ -101,8 +101,9 @@ completes.
 Open PowerShell as Administrator, then run this if SQL Server media is already
 under `D:\901TEC\SQLServer2022`:
 
-Because mixed mode is the default, this command prompts for a temporary
-bootstrap `sa` password during SQL setup. The script disables `sa` after setup.
+Because mixed mode is the default, this command prompts for an `sa` password
+during SQL setup. These DEV examples keep `sa` enabled and add the installing
+Windows user plus `BUILTIN\Administrators` as SQL sysadmins.
 
 ```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
@@ -123,6 +124,8 @@ foreach ($Directory in $RequiredDirectories) {
 .\scripts\Install-WinServerSql2022Rds.ps1 `
   -AcceptSqlLicenseTerms `
   -SqlMediaPath 'D:\901TEC\SQLServer2022' `
+  -KeepSaEnabled `
+  -SqlSysAdminAccounts "$($env:USERDOMAIN)\$($env:USERNAME)",'BUILTIN\Administrators' `
   -InstallRds `
   -RdsLicenseMode PerUser `
   -RdsUsers 'CONTOSO\AppUsers' `
@@ -152,6 +155,8 @@ foreach ($Directory in $RequiredDirectories) {
 .\scripts\Install-WinServerSql2022Rds.ps1 `
   -AcceptSqlLicenseTerms `
   -DownloadSqlMedia `
+  -KeepSaEnabled `
+  -SqlSysAdminAccounts "$($env:USERDOMAIN)\$($env:USERNAME)",'BUILTIN\Administrators' `
   -InstallRds `
   -RdsLicenseMode PerUser `
   -RdsUsers 'CONTOSO\AppUsers' `
@@ -209,6 +214,36 @@ Default SSMS settings:
 The script skips SSMS if it already appears installed unless `-Force` is used.
 You can also pass `-SsmsInstallerPath` to use a manually staged SSMS installer.
 
+## SSMS first connection
+
+SSMS 22 uses encrypted connections by default. On a fresh local SQL Server
+install without a trusted certificate, connect like this:
+
+1. Open SSMS with `Run as administrator`.
+2. Use server name `localhost` for the default SQL instance.
+3. Use `Windows Authentication`.
+4. Open `Options`, then `Connection Properties`.
+5. Check `Trust server certificate`.
+
+If you installed with `-KeepSaEnabled`, SQL Authentication with login `sa` also
+works after setup using the password you entered during installation. Without
+`-KeepSaEnabled`, this script disables `sa` after setup by default.
+
+If SQL Server is already installed and you need to re-apply DEV-friendly access,
+rerun the script from an elevated PowerShell session with SQL setup skipped:
+
+```powershell
+.\scripts\Install-WinServerSql2022Rds.ps1 `
+  -RepairSqlAccess `
+  -SkipSqlInstall `
+  -SkipRdsInstall `
+  -KeepSaEnabled `
+  -SqlSysAdminAccounts "$($env:USERDOMAIN)\$($env:USERNAME)",'BUILTIN\Administrators'
+```
+
+For an already-installed SQL instance, the main install path also re-applies the
+Windows sysadmin accounts and enables `sa` when `-KeepSaEnabled` is present.
+
 ## Common examples
 
 Install SQL Server only, mixed mode with `sa` disabled:
@@ -264,7 +299,7 @@ Install SQL Server with Windows Authentication only:
 | `-PromptForSaPassword` | Off | Force an interactive `sa` password prompt, even if `-SaPassword` is supplied. |
 | `-SaPassword` | None | SecureString `sa` password for unattended mixed mode. |
 | `-KeepSaEnabled` | Off | Leave the built-in `sa` login enabled after mixed-mode setup. |
-| `-SqlSysAdminAccounts` | `BUILTIN\Administrators` | Windows accounts added as SQL sysadmin. |
+| `-SqlSysAdminAccounts` | Current Windows user and `BUILTIN\Administrators` | Windows accounts added as SQL sysadmin. |
 | `-SqlProductKey` | None | Optional SQL Server product key for licensed media. |
 | `-SqlInstallDir` | `C:\Program Files\Microsoft SQL Server` | SQL Server instance root directory. |
 | `-SqlDataDir` | `C:\SQLData` | User database and tempdb data directory. |
@@ -282,6 +317,7 @@ Install SQL Server with Windows Authentication only:
 | `-RdsLicenseMode` | `PerUser` | RDS mode: `PerUser` or `PerDevice`. |
 | `-RdsLicenseServers` | Local computer | License server list to assign to Session Host. |
 | `-RdsUsers` | Empty | Users or groups to add to `Remote Desktop Users`. |
+| `-RepairSqlAccess` | Off | Re-add SQL sysadmin Windows accounts and enable `sa` when `-KeepSaEnabled` is present. |
 | `-Restart` | Off | Restart automatically if Windows features or SQL setup require it. |
 | `-SkipSqlInstall` | Off | Skip SQL Server installation. |
 | `-SkipRdsInstall` | Off | Skip RDS installation. |
