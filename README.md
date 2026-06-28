@@ -7,10 +7,11 @@ access for users.
 
 The script is intentionally conservative:
 
-- SQL Server installs in Windows Authentication mode by default.
-- The SQL `sa` login is not enabled unless you explicitly request mixed mode.
-- SQL Server binaries, data, logs, and backups are placed on the OS `C:` drive
-  by default for this bootstrap install.
+- SQL Server installs in mixed authentication mode by default, but disables the
+  built-in SQL `sa` login immediately after setup.
+- SQL Server data defaults to the OS `C:` drive, while SQL transaction logs and
+  backups default to `D:`.
+- SQL Server installation media defaults to `D:\901TEC\SQLServer2022`.
 - RDS roles can be installed now while RDS CALs are added later.
 - SQL Server media, product keys, and passwords are never stored in this repo.
 
@@ -18,9 +19,9 @@ The script is intentionally conservative:
 
 - SQL Server 2022 Database Engine from a local folder, mounted ISO, or `setup.exe`.
 - SQL Server service virtual accounts.
-- SQL Server paths on `C:` by default:
-  `C:\Program Files\Microsoft SQL Server`, `C:\SQLData`, `C:\SQLLogs`, and
-  `C:\SQLBackups`.
+- SQL Server paths that remain changeable with parameters:
+  `C:\Program Files\Microsoft SQL Server`, `C:\SQLData`, `D:\SQLLogs`, and
+  `D:\SQLBackups`.
 - Optional SQL TCP/IP enablement and firewall rule.
 - Remote Desktop Session Host and RD Licensing roles.
 - Windows Remote Desktop firewall rules.
@@ -39,13 +40,15 @@ For SQL Server, use properly licensed SQL Server 2022 media or evaluation media.
 If you install Evaluation edition, plan the edition upgrade before the
 evaluation period expires.
 
-## SQL `sa` account behavior
+## SQL authentication behavior
 
-Default behavior is Windows Authentication:
+Default behavior is mixed authentication mode with SQL logins locked down:
 
-- No `sa` password is requested.
-- SQL logins are not enabled.
-- The built-in SQL `sa` login remains disabled.
+- SQL Server setup requires an `sa` password for mixed mode, so the script
+  prompts for a temporary bootstrap `sa` password unless you pass `-SaPassword`.
+- After setup completes, the script connects with Windows Authentication and
+  disables the built-in `sa` login.
+- The installer does not create any additional SQL logins.
 - Members of `BUILTIN\Administrators` are made SQL sysadmins unless you pass a
   different `-SqlSysAdminAccounts` list.
 
@@ -55,24 +58,25 @@ Permission-wise, that is effectively equivalent to `sa`. If you want tighter
 control, pass a specific domain or local group with `-SqlSysAdminAccounts`, such
 as `CONTOSO\DBAdmins`.
 
-If you need SQL Authentication, install in mixed mode:
+Windows admin users can add SQL logins later from SQL Server Management Studio
+or T-SQL after the install. If you want Windows Authentication only, pass
+`-SqlAuthMode Windows`. If you intentionally want the `sa` login left enabled,
+pass `-KeepSaEnabled`.
+
+Mixed mode with `sa` disabled is the default, but this is the explicit form:
 
 ```powershell
 .\scripts\Install-WinServerSql2022Rds.ps1 `
   -AcceptSqlLicenseTerms `
-  -SqlMediaPath 'D:\' `
+  -SqlMediaPath 'D:\901TEC\SQLServer2022' `
   -SqlAuthMode Mixed `
   -PromptForSaPassword `
   -InstallRds
 ```
 
-In mixed mode the script prompts interactively for the `sa` password during
-install. It writes the password only to a temporary SQL setup configuration file
-with restricted ACLs, then deletes that file after setup completes.
-
-You can switch SQL Server from Windows Authentication to mixed mode later, but
-doing it during install is cleaner because SQL setup validates and configures
-the `sa` password as part of the installation.
+The script writes the bootstrap `sa` password only to a temporary SQL setup
+configuration file with restricted ACLs, then deletes that file after setup
+completes.
 
 ## Prerequisites
 
@@ -87,12 +91,15 @@ the `sa` password as part of the installation.
 
 Open PowerShell as Administrator, then run:
 
+Because mixed mode is the default, this command prompts for a temporary
+bootstrap `sa` password during SQL setup. The script disables `sa` after setup.
+
 ```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 
 .\scripts\Install-WinServerSql2022Rds.ps1 `
   -AcceptSqlLicenseTerms `
-  -SqlMediaPath 'D:\' `
+  -SqlMediaPath 'D:\901TEC\SQLServer2022' `
   -InstallRds `
   -RdsLicenseMode PerUser `
   -RdsUsers 'CONTOSO\AppUsers' `
@@ -101,24 +108,24 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
   -Restart
 ```
 
-Use `D:\` when the SQL Server ISO is already mounted. You can also pass an ISO
-path or a direct path to `setup.exe`:
+Use `D:\901TEC\SQLServer2022` when the SQL Server installer files live there.
+You can also pass an ISO path, mounted ISO drive, or direct path to `setup.exe`:
 
 ```powershell
 .\scripts\Install-WinServerSql2022Rds.ps1 `
   -AcceptSqlLicenseTerms `
-  -SqlMediaPath 'C:\Installers\SQLServer2022-x64-ENU.iso' `
+  -SqlMediaPath 'D:\901TEC\SQLServer2022-x64-ENU.iso' `
   -InstallRds
 ```
 
 ## Common examples
 
-Install SQL Server only, Windows Authentication:
+Install SQL Server only, mixed mode with `sa` disabled:
 
 ```powershell
 .\scripts\Install-WinServerSql2022Rds.ps1 `
   -AcceptSqlLicenseTerms `
-  -SqlMediaPath 'D:\' `
+  -SqlMediaPath 'D:\901TEC\SQLServer2022' `
   -SkipRdsInstall
 ```
 
@@ -127,7 +134,7 @@ Install SQL Server with named sysadmin accounts:
 ```powershell
 .\scripts\Install-WinServerSql2022Rds.ps1 `
   -AcceptSqlLicenseTerms `
-  -SqlMediaPath 'D:\' `
+  -SqlMediaPath 'D:\901TEC\SQLServer2022' `
   -SqlSysAdminAccounts 'CONTOSO\DBAdmins','CONTOSO\SqlOps'
 ```
 
@@ -141,14 +148,13 @@ Install RDS roles only:
   -RdsUsers 'CONTOSO\AppUsers'
 ```
 
-Install SQL Server with SQL Authentication enabled:
+Install SQL Server with Windows Authentication only:
 
 ```powershell
 .\scripts\Install-WinServerSql2022Rds.ps1 `
   -AcceptSqlLicenseTerms `
-  -SqlMediaPath 'D:\' `
-  -SqlAuthMode Mixed `
-  -PromptForSaPassword
+  -SqlMediaPath 'D:\901TEC\SQLServer2022' `
+  -SqlAuthMode Windows
 ```
 
 ## Parameters
@@ -156,18 +162,19 @@ Install SQL Server with SQL Authentication enabled:
 | Parameter | Default | Purpose |
 | --- | --- | --- |
 | `-AcceptSqlLicenseTerms` | Off | Required for SQL Server setup. |
-| `-SqlMediaPath` | None | Folder, ISO, or `setup.exe` for SQL Server 2022 setup. |
+| `-SqlMediaPath` | `D:\901TEC\SQLServer2022` | Folder, ISO, or `setup.exe` for SQL Server 2022 setup. |
 | `-SqlInstanceName` | `MSSQLSERVER` | SQL instance name. |
 | `-SqlFeatures` | `SQLENGINE` | SQL setup features to install. |
-| `-SqlAuthMode` | `Windows` | `Windows` or `Mixed`. |
-| `-PromptForSaPassword` | Off | Prompt for `sa` password when mixed mode is selected. |
+| `-SqlAuthMode` | `Mixed` | `Windows` or `Mixed`. |
+| `-PromptForSaPassword` | Off | Force an interactive `sa` password prompt, even if `-SaPassword` is supplied. |
 | `-SaPassword` | None | SecureString `sa` password for unattended mixed mode. |
+| `-KeepSaEnabled` | Off | Leave the built-in `sa` login enabled after mixed-mode setup. |
 | `-SqlSysAdminAccounts` | `BUILTIN\Administrators` | Windows accounts added as SQL sysadmin. |
 | `-SqlProductKey` | None | Optional SQL Server product key for licensed media. |
 | `-SqlInstallDir` | `C:\Program Files\Microsoft SQL Server` | SQL Server instance root directory. |
 | `-SqlDataDir` | `C:\SQLData` | User database and tempdb data directory. |
-| `-SqlLogDir` | `C:\SQLLogs` | User database and tempdb log directory. |
-| `-SqlBackupDir` | `C:\SQLBackups` | SQL backup directory. |
+| `-SqlLogDir` | `D:\SQLLogs` | User database and tempdb log directory. |
+| `-SqlBackupDir` | `D:\SQLBackups` | SQL backup directory. |
 | `-EnableSqlTcp` | Off | Enable SQL TCP/IP after setup. |
 | `-SqlTcpPort` | `1433` | Static SQL TCP port when TCP/IP is enabled. |
 | `-OpenSqlFirewall` | Off | Add inbound firewall rule for the SQL TCP port. |
@@ -208,5 +215,6 @@ SQL Server setup and RDS role installation can both require a restart. Without
 - Avoid exposing SQL Server TCP/IP to broad networks.
 - Keep the SQL Server service account model simple unless you need domain
   service accounts.
-- Use a strong, unique `sa` password if mixed mode is required.
+- Use a strong, unique bootstrap `sa` password for mixed mode, even though this
+  script disables `sa` after setup by default.
 - Add only the required users or groups to `Remote Desktop Users`.

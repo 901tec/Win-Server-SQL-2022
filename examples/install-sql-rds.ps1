@@ -5,7 +5,7 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 
 ..\scripts\Install-WinServerSql2022Rds.ps1 `
     -AcceptSqlLicenseTerms `
-    -SqlMediaPath 'D:\' `
+    -SqlMediaPath 'D:\901TEC\SQLServer2022' `
     -InstallRds `
     -RdsLicenseMode PerUser `
     -RdsUsers 'CONTOSO\AppUsers' `

@@ -3,7 +3,7 @@
 
 [CmdletBinding()]
 param(
-    [string]$SqlMediaPath,
+    [string]$SqlMediaPath = 'D:\901TEC\SQLServer2022',
 
     [ValidatePattern('^[A-Za-z0-9_]{1,16}$')]
     [string]$SqlInstanceName = 'MSSQLSERVER',
@@ -12,11 +12,13 @@ param(
     [string[]]$SqlFeatures = @('SQLENGINE'),
 
     [ValidateSet('Windows', 'Mixed')]
-    [string]$SqlAuthMode = 'Windows',
+    [string]$SqlAuthMode = 'Mixed',
 
     [SecureString]$SaPassword,
 
     [switch]$PromptForSaPassword,
+
+    [switch]$KeepSaEnabled,
 
     [ValidateNotNullOrEmpty()]
     [string[]]$SqlSysAdminAccounts = @('BUILTIN\Administrators'),
@@ -27,9 +29,9 @@ param(
 
     [string]$SqlDataDir = 'C:\SQLData',
 
-    [string]$SqlLogDir = 'C:\SQLLogs',
+    [string]$SqlLogDir = 'D:\SQLLogs',
 
-    [string]$SqlBackupDir = 'C:\SQLBackups',
+    [string]$SqlBackupDir = 'D:\SQLBackups',
 
     [switch]$EnableSqlTcp,
 
@@ -236,6 +238,79 @@ function Get-SqlServiceName {
     return "MSSQL`$$InstanceName"
 }
 
+function Get-SqlConnectionServerName {
+    param([Parameter(Mandatory = $true)][string]$InstanceName)
+
+    if ($InstanceName -eq 'MSSQLSERVER') {
+        return 'localhost'
+    }
+
+    return "localhost\$InstanceName"
+}
+
+function Invoke-SqlNonQueryWithRetry {
+    param(
+        [Parameter(Mandatory = $true)][string]$InstanceName,
+        [Parameter(Mandatory = $true)][string]$Query,
+        [int]$TimeoutSeconds = 120
+    )
+
+    $serverName = Get-SqlConnectionServerName -InstanceName $InstanceName
+    $connectionString = "Server=$serverName;Database=master;Integrated Security=SSPI;Connection Timeout=5;"
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    $lastError = $null
+
+    do {
+        $connection = $null
+        $command = $null
+
+        try {
+            $connection = New-Object System.Data.SqlClient.SqlConnection -ArgumentList $connectionString
+            $connection.Open()
+
+            $command = $connection.CreateCommand()
+            $command.CommandTimeout = 30
+            $command.CommandText = $Query
+            $command.ExecuteNonQuery() | Out-Null
+            return
+        }
+        catch {
+            $lastError = $_.Exception
+            if ([DateTime]::UtcNow -ge $deadline) {
+                throw "SQL command failed on $serverName after $TimeoutSeconds seconds: $($lastError.Message)"
+            }
+
+            Start-Sleep -Seconds 5
+        }
+        finally {
+            if ($command) {
+                $command.Dispose()
+            }
+
+            if ($connection) {
+                $connection.Dispose()
+            }
+        }
+    } while ($true)
+}
+
+function Disable-SqlSaLogin {
+    param([Parameter(Mandatory = $true)][string]$InstanceName)
+
+    $query = @"
+DECLARE @SaLoginName sysname = SUSER_SNAME(0x01);
+
+IF @SaLoginName IS NOT NULL
+BEGIN
+    DECLARE @Sql nvarchar(max) = N'ALTER LOGIN ' + QUOTENAME(@SaLoginName) + N' DISABLE;';
+    EXEC sys.sp_executesql @Sql;
+END;
+"@
+
+    Write-Step "Disabling the SQL sa login"
+    Invoke-SqlNonQueryWithRetry -InstanceName $InstanceName -Query $query
+}
+
 function New-SqlSetupConfigurationFile {
     param(
         [Parameter(Mandatory = $true)][string]$InstanceName,
@@ -379,6 +454,10 @@ function Invoke-SqlSetup {
         }
         elseif ($process.ExitCode -ne 0) {
             throw "SQL Server setup failed with exit code $($process.ExitCode). Review SQL setup logs under C:\Program Files\Microsoft SQL Server\160\Setup Bootstrap\Log."
+        }
+
+        if ($SqlAuthMode -eq 'Mixed' -and -not $KeepSaEnabled) {
+            Disable-SqlSaLogin -InstanceName $SqlInstanceName
         }
     }
     finally {
