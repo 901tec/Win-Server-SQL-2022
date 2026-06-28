@@ -9,6 +9,8 @@ The script is intentionally conservative:
 
 - SQL Server installs in Windows Authentication mode by default.
 - The SQL `sa` login is not enabled unless you explicitly request mixed mode.
+- SQL Server binaries, data, logs, and backups are placed on the OS `C:` drive
+  by default for this bootstrap install.
 - RDS roles can be installed now while RDS CALs are added later.
 - SQL Server media, product keys, and passwords are never stored in this repo.
 
@@ -16,6 +18,9 @@ The script is intentionally conservative:
 
 - SQL Server 2022 Database Engine from a local folder, mounted ISO, or `setup.exe`.
 - SQL Server service virtual accounts.
+- SQL Server paths on `C:` by default:
+  `C:\Program Files\Microsoft SQL Server`, `C:\SQLData`, `C:\SQLLogs`, and
+  `C:\SQLBackups`.
 - Optional SQL TCP/IP enablement and firewall rule.
 - Remote Desktop Session Host and RD Licensing roles.
 - Windows Remote Desktop firewall rules.
@@ -43,6 +48,12 @@ Default behavior is Windows Authentication:
 - The built-in SQL `sa` login remains disabled.
 - Members of `BUILTIN\Administrators` are made SQL sysadmins unless you pass a
   different `-SqlSysAdminAccounts` list.
+
+That means local Windows Administrators are not literally using the `sa` login,
+but they do receive the SQL Server `sysadmin` role by default in this script.
+Permission-wise, that is effectively equivalent to `sa`. If you want tighter
+control, pass a specific domain or local group with `-SqlSysAdminAccounts`, such
+as `CONTOSO\DBAdmins`.
 
 If you need SQL Authentication, install in mixed mode:
 
@@ -153,9 +164,10 @@ Install SQL Server with SQL Authentication enabled:
 | `-SaPassword` | None | SecureString `sa` password for unattended mixed mode. |
 | `-SqlSysAdminAccounts` | `BUILTIN\Administrators` | Windows accounts added as SQL sysadmin. |
 | `-SqlProductKey` | None | Optional SQL Server product key for licensed media. |
-| `-SqlInstallDir` | SQL default | Optional SQL Server instance root directory. |
-| `-SqlDataDir` | SQL default | Optional user database and tempdb directory. |
-| `-SqlBackupDir` | SQL default | Optional SQL backup directory. |
+| `-SqlInstallDir` | `C:\Program Files\Microsoft SQL Server` | SQL Server instance root directory. |
+| `-SqlDataDir` | `C:\SQLData` | User database and tempdb data directory. |
+| `-SqlLogDir` | `C:\SQLLogs` | User database and tempdb log directory. |
+| `-SqlBackupDir` | `C:\SQLBackups` | SQL backup directory. |
 | `-EnableSqlTcp` | Off | Enable SQL TCP/IP after setup. |
 | `-SqlTcpPort` | `1433` | Static SQL TCP port when TCP/IP is enabled. |
 | `-OpenSqlFirewall` | Off | Add inbound firewall rule for the SQL TCP port. |

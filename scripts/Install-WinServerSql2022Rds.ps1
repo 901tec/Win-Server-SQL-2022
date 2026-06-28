@@ -23,11 +23,13 @@ param(
 
     [string]$SqlProductKey,
 
-    [string]$SqlInstallDir,
+    [string]$SqlInstallDir = 'C:\Program Files\Microsoft SQL Server',
 
-    [string]$SqlDataDir,
+    [string]$SqlDataDir = 'C:\SQLData',
 
-    [string]$SqlBackupDir,
+    [string]$SqlLogDir = 'C:\SQLLogs',
+
+    [string]$SqlBackupDir = 'C:\SQLBackups',
 
     [switch]$EnableSqlTcp,
 
@@ -152,6 +154,14 @@ function Quote-IniList {
     ($Values | ForEach-Object { Quote-IniValue -Value $_ }) -join ' '
 }
 
+function Ensure-Directory {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
+        New-Item -Path $Path -ItemType Directory -Force | Out-Null
+    }
+}
+
 function Set-PrivateFileAcl {
     param([Parameter(Mandatory = $true)][string]$Path)
 
@@ -260,7 +270,11 @@ function New-SqlSetupConfigurationFile {
     if ($SqlDataDir) {
         $lines.Add(('SQLUSERDBDIR={0}' -f (Quote-IniValue -Value $SqlDataDir)))
         $lines.Add(('SQLTEMPDBDIR={0}' -f (Quote-IniValue -Value $SqlDataDir)))
-        $lines.Add(('SQLTEMPDBLOGDIR={0}' -f (Quote-IniValue -Value $SqlDataDir)))
+    }
+
+    if ($SqlLogDir) {
+        $lines.Add(('SQLUSERDBLOGDIR={0}' -f (Quote-IniValue -Value $SqlLogDir)))
+        $lines.Add(('SQLTEMPDBLOGDIR={0}' -f (Quote-IniValue -Value $SqlLogDir)))
     }
 
     if ($SqlBackupDir) {
@@ -321,6 +335,22 @@ function Invoke-SqlSetup {
     }
     elseif ($SaPassword) {
         throw "-SaPassword is only valid when -SqlAuthMode Mixed is selected."
+    }
+
+    if ($SqlInstallDir) {
+        Ensure-Directory -Path $SqlInstallDir
+    }
+
+    if ($SqlDataDir) {
+        Ensure-Directory -Path $SqlDataDir
+    }
+
+    if ($SqlLogDir) {
+        Ensure-Directory -Path $SqlLogDir
+    }
+
+    if ($SqlBackupDir) {
+        Ensure-Directory -Path $SqlBackupDir
     }
 
     $configPath = New-SqlSetupConfigurationFile `
