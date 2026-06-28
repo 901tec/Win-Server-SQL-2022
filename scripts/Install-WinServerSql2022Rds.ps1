@@ -5,6 +5,15 @@
 param(
     [string]$SqlMediaPath = 'D:\901TEC\SQLServer2022',
 
+    [switch]$DownloadSqlMedia,
+
+    [string]$SqlDownloadUrl = 'https://go.microsoft.com/fwlink/?linkid=2215158',
+
+    [string]$SqlDownloadDir = 'D:\901TEC\Downloads',
+
+    [ValidateSet('ISO')]
+    [string]$SqlDownloadMediaType = 'ISO',
+
     [ValidatePattern('^[A-Za-z0-9_]{1,16}$')]
     [string]$SqlInstanceName = 'MSSQLSERVER',
 
@@ -164,6 +173,50 @@ function Ensure-Directory {
     }
 }
 
+function Get-DownloadFileName {
+    param(
+        [Parameter(Mandatory = $true)][string]$Uri,
+        [Parameter(Mandatory = $true)][string]$DefaultFileName
+    )
+
+    try {
+        $parsedUri = [Uri]$Uri
+        $fileName = [IO.Path]::GetFileName($parsedUri.AbsolutePath)
+
+        if ($fileName -and [IO.Path]::GetExtension($fileName) -ieq '.exe') {
+            return $fileName
+        }
+    }
+    catch {
+        Write-Verbose "Could not parse download file name from $Uri"
+    }
+
+    return $DefaultFileName
+}
+
+function Save-FileFromUrl {
+    param(
+        [Parameter(Mandatory = $true)][string]$Uri,
+        [Parameter(Mandatory = $true)][string]$OutFile
+    )
+
+    Ensure-Directory -Path (Split-Path -Path $OutFile -Parent)
+
+    try {
+        Invoke-WebRequest -Uri $Uri -OutFile $OutFile -UseBasicParsing
+    }
+    catch {
+        Write-Warning "Invoke-WebRequest failed: $($_.Exception.Message). Trying WebClient."
+        $webClient = New-Object System.Net.WebClient
+        try {
+            $webClient.DownloadFile($Uri, $OutFile)
+        }
+        finally {
+            $webClient.Dispose()
+        }
+    }
+}
+
 function Set-PrivateFileAcl {
     param([Parameter(Mandatory = $true)][string]$Path)
 
@@ -182,50 +235,133 @@ function Set-PrivateFileAcl {
     Set-Acl -LiteralPath $Path -AclObject $acl
 }
 
-function Resolve-SqlSetupPath {
+function Get-SqlMediaCandidatePath {
     param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return $null
+    }
 
     $resolvedPath = Resolve-Path -LiteralPath $Path -ErrorAction Stop | Select-Object -First 1 -ExpandProperty ProviderPath
 
     if (Test-Path -LiteralPath $resolvedPath -PathType Leaf) {
         $leafName = Split-Path -Leaf $resolvedPath
 
-        if ($leafName -ieq 'setup.exe') {
+        if ($leafName -ieq 'setup.exe' -or [IO.Path]::GetExtension($resolvedPath) -ieq '.iso') {
             return $resolvedPath
         }
 
-        if ([IO.Path]::GetExtension($resolvedPath) -ieq '.iso') {
-            Write-Step "Mounting SQL Server ISO"
-            $image = Mount-DiskImage -ImagePath $resolvedPath -PassThru
-            $script:MountedSqlImagePath = $resolvedPath
-
-            $volume = $image | Get-Volume | Where-Object { $_.DriveLetter } | Select-Object -First 1
-            if (-not $volume) {
-                Start-Sleep -Seconds 3
-                $volume = Get-DiskImage -ImagePath $resolvedPath | Get-Volume | Where-Object { $_.DriveLetter } | Select-Object -First 1
-            }
-
-            if (-not $volume) {
-                throw "Mounted ISO, but no drive letter was assigned."
-            }
-
-            $setupFromIso = Join-Path -Path ($volume.DriveLetter + ':\') -ChildPath 'setup.exe'
-            if (-not (Test-Path -LiteralPath $setupFromIso -PathType Leaf)) {
-                throw "Mounted ISO does not contain setup.exe at $setupFromIso"
-            }
-
-            return $setupFromIso
-        }
-
-        throw "SqlMediaPath must be a folder containing setup.exe, an ISO file, or setup.exe itself."
+        return $null
     }
 
     $setupFromFolder = Join-Path -Path $resolvedPath -ChildPath 'setup.exe'
-    if (-not (Test-Path -LiteralPath $setupFromFolder -PathType Leaf)) {
-        throw "Could not find setup.exe in $resolvedPath"
+    if (Test-Path -LiteralPath $setupFromFolder -PathType Leaf) {
+        return $setupFromFolder
     }
 
-    return $setupFromFolder
+    $nestedSetup = Get-ChildItem -LiteralPath $resolvedPath -Filter 'setup.exe' -Recurse -File -ErrorAction SilentlyContinue |
+        Sort-Object -Property FullName |
+        Select-Object -First 1
+
+    if ($nestedSetup) {
+        return $nestedSetup.FullName
+    }
+
+    $iso = Get-ChildItem -LiteralPath $resolvedPath -Filter '*.iso' -File -ErrorAction SilentlyContinue |
+        Sort-Object -Property LastWriteTime -Descending |
+        Select-Object -First 1
+
+    if ($iso) {
+        return $iso.FullName
+    }
+
+    return $null
+}
+
+function Resolve-SqlSetupPath {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $candidatePath = Get-SqlMediaCandidatePath -Path $Path
+    if (-not $candidatePath) {
+        throw "SqlMediaPath must be a folder containing setup.exe or one SQL Server ISO, an ISO file, or setup.exe itself."
+    }
+
+    if ([IO.Path]::GetFileName($candidatePath) -ieq 'setup.exe') {
+        return $candidatePath
+    }
+
+    if ([IO.Path]::GetExtension($candidatePath) -ieq '.iso') {
+        Write-Step "Mounting SQL Server ISO"
+        $image = Mount-DiskImage -ImagePath $candidatePath -PassThru
+        $script:MountedSqlImagePath = $candidatePath
+
+        $volume = $image | Get-Volume | Where-Object { $_.DriveLetter } | Select-Object -First 1
+        if (-not $volume) {
+            Start-Sleep -Seconds 3
+            $volume = Get-DiskImage -ImagePath $candidatePath | Get-Volume | Where-Object { $_.DriveLetter } | Select-Object -First 1
+        }
+
+        if (-not $volume) {
+            throw "Mounted ISO, but no drive letter was assigned."
+        }
+
+        $setupFromIso = Join-Path -Path ($volume.DriveLetter + ':\') -ChildPath 'setup.exe'
+        if (-not (Test-Path -LiteralPath $setupFromIso -PathType Leaf)) {
+            throw "Mounted ISO does not contain setup.exe at $setupFromIso"
+        }
+
+        return $setupFromIso
+    }
+
+    throw "Unsupported SQL media candidate: $candidatePath"
+}
+
+function Invoke-SqlMediaDownload {
+    if ([IO.Path]::GetExtension($SqlMediaPath)) {
+        throw "When -DownloadSqlMedia is used, -SqlMediaPath must be a destination folder, not a file path."
+    }
+
+    $existingMedia = Get-SqlMediaCandidatePath -Path $SqlMediaPath
+    if ($existingMedia -and -not $Force) {
+        Write-Host "SQL Server media already exists at $existingMedia"
+        return
+    }
+
+    Write-Step "Downloading SQL Server 2022 media"
+    Ensure-Directory -Path $SqlDownloadDir
+    Ensure-Directory -Path $SqlMediaPath
+
+    $bootstrapperName = Get-DownloadFileName -Uri $SqlDownloadUrl -DefaultFileName 'SQL2022-SSEI-Dev.exe'
+    $bootstrapperPath = Join-Path -Path $SqlDownloadDir -ChildPath $bootstrapperName
+
+    if (-not (Test-Path -LiteralPath $bootstrapperPath -PathType Leaf) -or $Force) {
+        Write-Host "Downloading SQL Server bootstrapper to $bootstrapperPath"
+        Save-FileFromUrl -Uri $SqlDownloadUrl -OutFile $bootstrapperPath
+    }
+    else {
+        Write-Host "Using existing SQL Server bootstrapper at $bootstrapperPath"
+    }
+
+    $arguments = @(
+        '/ACTION=Download',
+        ('/MEDIATYPE={0}' -f $SqlDownloadMediaType),
+        ('/MEDIAPATH="{0}"' -f $SqlMediaPath),
+        '/QUIET'
+    )
+
+    Write-Host "Downloading SQL Server install media to $SqlMediaPath"
+    $process = Start-Process -FilePath $bootstrapperPath -ArgumentList $arguments -Wait -PassThru
+
+    if ($process.ExitCode -ne 0) {
+        throw "SQL Server media download failed with exit code $($process.ExitCode)."
+    }
+
+    $downloadedMedia = Get-SqlMediaCandidatePath -Path $SqlMediaPath
+    if (-not $downloadedMedia) {
+        throw "SQL Server media download completed, but no setup.exe or ISO was found under $SqlMediaPath."
+    }
+
+    Write-Host "SQL Server media is ready at $downloadedMedia"
 }
 
 function Get-SqlServiceName {
@@ -622,6 +758,10 @@ try {
     if (-not $SkipSqlInstall) {
         if (-not $SqlMediaPath) {
             throw "SqlMediaPath is required unless -SkipSqlInstall is used."
+        }
+
+        if ($DownloadSqlMedia) {
+            Invoke-SqlMediaDownload
         }
 
         $setupPath = Resolve-SqlSetupPath -Path $SqlMediaPath

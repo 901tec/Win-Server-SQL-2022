@@ -12,6 +12,7 @@ The script is intentionally conservative:
 - SQL Server data defaults to the OS `C:` drive, while SQL transaction logs and
   backups default to `D:`.
 - SQL Server installation media defaults to `D:\901TEC\SQLServer2022`.
+- SQL Server 2022 media can optionally be downloaded to `D:` before install.
 - RDS roles can be installed now while RDS CALs are added later.
 - SQL Server media, product keys, and passwords are never stored in this repo.
 
@@ -39,6 +40,13 @@ role with this script and add/activate CALs later through RD Licensing Manager.
 For SQL Server, use properly licensed SQL Server 2022 media or evaluation media.
 If you install Evaluation edition, plan the edition upgrade before the
 evaluation period expires.
+
+The built-in download option uses Microsoft's SQL Server 2022 Developer
+bootstrapper by default. Developer edition is useful for development and testing,
+but it is not licensed for production workloads. For licensed Standard or
+Enterprise deployments, either stage your licensed media at
+`D:\901TEC\SQLServer2022` or pass your own approved download URL with
+`-SqlDownloadUrl`.
 
 ## SQL authentication behavior
 
@@ -89,7 +97,8 @@ completes.
 
 ## Quick start
 
-Open PowerShell as Administrator, then run:
+Open PowerShell as Administrator, then run this if SQL Server media is already
+under `D:\901TEC\SQLServer2022`:
 
 Because mixed mode is the default, this command prompts for a temporary
 bootstrap `sa` password during SQL setup. The script disables `sa` after setup.
@@ -108,8 +117,24 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
   -Restart
 ```
 
+To have the script download SQL Server 2022 Developer media to `D:` first, add
+`-DownloadSqlMedia`:
+
+```powershell
+.\scripts\Install-WinServerSql2022Rds.ps1 `
+  -AcceptSqlLicenseTerms `
+  -DownloadSqlMedia `
+  -InstallRds `
+  -RdsLicenseMode PerUser `
+  -RdsUsers 'CONTOSO\AppUsers' `
+  -EnableSqlTcp `
+  -OpenSqlFirewall `
+  -Restart
+```
+
 Use `D:\901TEC\SQLServer2022` when the SQL Server installer files live there.
-You can also pass an ISO path, mounted ISO drive, or direct path to `setup.exe`:
+You can also pass an ISO path, mounted ISO drive, or direct path to `setup.exe`.
+For an ISO:
 
 ```powershell
 .\scripts\Install-WinServerSql2022Rds.ps1 `
@@ -117,6 +142,28 @@ You can also pass an ISO path, mounted ISO drive, or direct path to `setup.exe`:
   -SqlMediaPath 'D:\901TEC\SQLServer2022-x64-ENU.iso' `
   -InstallRds
 ```
+
+## Download behavior
+
+When `-DownloadSqlMedia` is used, the script:
+
+1. Downloads the SQL Server bootstrapper to `D:\901TEC\Downloads`.
+2. Uses that bootstrapper to download SQL Server install media into
+   `D:\901TEC\SQLServer2022`.
+3. Finds the downloaded ISO or `setup.exe`.
+4. Mounts the ISO if needed, then installs SQL Server from the local media.
+
+Default download settings:
+
+```powershell
+-SqlDownloadUrl 'https://go.microsoft.com/fwlink/?linkid=2215158'
+-SqlDownloadDir 'D:\901TEC\Downloads'
+-SqlDownloadMediaType ISO
+```
+
+The default Microsoft URL currently points to the SQL Server 2022 Developer
+bootstrapper. Override `-SqlDownloadUrl` if you maintain an internal or licensed
+installer source.
 
 ## Common examples
 
@@ -163,6 +210,10 @@ Install SQL Server with Windows Authentication only:
 | --- | --- | --- |
 | `-AcceptSqlLicenseTerms` | Off | Required for SQL Server setup. |
 | `-SqlMediaPath` | `D:\901TEC\SQLServer2022` | Folder, ISO, or `setup.exe` for SQL Server 2022 setup. |
+| `-DownloadSqlMedia` | Off | Download SQL Server media before installing if local media is not already present. |
+| `-SqlDownloadUrl` | Microsoft SQL Server 2022 Developer bootstrapper | URL for the SQL Server bootstrapper or approved internal download. |
+| `-SqlDownloadDir` | `D:\901TEC\Downloads` | Folder where the SQL bootstrapper is stored. |
+| `-SqlDownloadMediaType` | `ISO` | Downloaded media type. ISO is the supported path for this script. |
 | `-SqlInstanceName` | `MSSQLSERVER` | SQL instance name. |
 | `-SqlFeatures` | `SQLENGINE` | SQL setup features to install. |
 | `-SqlAuthMode` | `Mixed` | `Windows` or `Mixed`. |

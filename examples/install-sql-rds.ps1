@@ -1,10 +1,13 @@
 # Example: run from an elevated PowerShell session on Windows Server 2022.
-# Adjust the SQL media path and RDS users/groups before running.
+# This downloads SQL Server 2022 Developer media to D:\901TEC before installing.
+# For licensed Standard/Enterprise media, stage it at D:\901TEC\SQLServer2022
+# and remove -DownloadSqlMedia.
 
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 
 ..\scripts\Install-WinServerSql2022Rds.ps1 `
     -AcceptSqlLicenseTerms `
+    -DownloadSqlMedia `
     -SqlMediaPath 'D:\901TEC\SQLServer2022' `
     -InstallRds `
     -RdsLicenseMode PerUser `
